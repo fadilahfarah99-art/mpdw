@@ -1,2 +1,2 @@
 # mpdw
-praktikum MDPW 2023
+praktikum MDPW 
