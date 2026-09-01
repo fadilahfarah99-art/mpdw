@@ -1,0 +1,338 @@
+---
+title: "Tugas Pertemuan-2"
+author: "Farah"
+output:
+  html_document: default
+  pdf_document: default
+  word_document: default
+---
+
+```{r setup, include=FALSE}
+# Baris ini memastikan folder kerja saat proses Knit
+# SAMA PERSIS dengan folder tempat file .Rmd dan data_farah.csv berada.
+# Ganti path di bawah jika lokasi foldermu berbeda.
+knitr::opts_knit$set(root.dir = "C:/Users/USER/Downloads/tugas mpdw1")
+```
+
+## Library/Packages
+
+*Package* R yang digunakan pada tugas ini adalah: `forecast`, `graphics`, `TTR`, `TSA`. Jika *package* tersebut belum ada, silakan install terlebih dahulu.
+
+```{r}
+#install.packages("forecast")
+#install.packages("graphics")
+#install.packages("TTR")
+#install.packages("TSA")
+```
+
+Jika sudah ada, silakan panggil library *package* tersebut.
+
+```{r message=FALSE, warning=FALSE}
+library("forecast")
+library("graphics")
+library("TTR")
+library("TSA")
+```
+
+## Impor Data
+
+Data yang digunakan adalah bagian pribadi (periode ke-501 sampai 600) dari variabel `rail_monorail` pada data kelompok "Jumlah Penumpang Transportasi Umum Malaysia".
+
+```{r}
+library(rio) #install packages jika belum ada
+data_farah <- import("data_farah.csv")
+
+# menampilkan 5 data pertama
+head(data_farah)
+```
+
+## Eksplorasi Data
+
+```{r}
+str(data_farah)
+dim(data_farah)
+```
+
+Mengubah data agar terbaca sebagai data deret waktu dengan fungsi `ts()`.
+
+```{r}
+farah.ts <- ts(data_farah$Farah)
+summary(farah.ts)
+```
+
+Membuat plot data deret waktu.
+
+```{r}
+ts.plot(farah.ts, xlab = "Periode", ylab = "Jumlah Penumpang Rail Monorail",
+        main = "Time Series Plot - Data Farah (Periode 501-600)")
+points(farah.ts)
+```
+
+Dari plot terlihat data berfluktuasi di sekitar nilai rata-rata tanpa kenaikan/penurunan jangka panjang yang jelas -> mengindikasikan pola **stasioner/konstan**, bukan tren atau musiman kuat.
+
+## Pembagian Data
+
+Pembagian data latih dan data uji dilakukan dengan perbandingan 80% data latih dan 20% data uji, sesuai dengan 100 observasi yang dimiliki (80 data latih, 20 data uji).
+
+```{r}
+n <- nrow(data_farah)
+n_train <- floor(0.8 * n)
+n_test  <- n - n_train
+
+training <- data_farah[1:n_train, ]
+testing  <- data_farah[(n_train+1):n, ]
+
+train.ts <- ts(training$Farah)
+test.ts  <- ts(testing$Farah)
+
+n_train
+n_test
+```
+
+```{r}
+plot(farah.ts, col = "red", main = "Plot semua data")
+points(farah.ts)
+
+plot(train.ts, col = "blue", main = "Plot data latih")
+points(train.ts)
+
+plot(test.ts, col = "blue", main = "Plot data uji")
+points(test.ts)
+```
+
+## Single Moving Average (SMA)
+
+SMA cocok untuk data berpola stasioner/konstan. Pemulusan dilakukan dengan `m = 4`.
+
+```{r}
+data.sma <- SMA(train.ts, n = 4)
+data.ramal <- c(NA, data.sma)
+
+data.gab <- cbind(
+  aktual    = c(farah.ts),
+  pemulusan = c(data.sma, rep(NA, n_test)),
+  ramalan   = c(data.ramal, rep(data.ramal[length(data.ramal)], n_test - 1))
+)
+tail(data.gab, 10)
+```
+
+```{r}
+ts.plot(farah.ts, xlab = "Periode", ylab = "Jumlah Penumpang", main = "SMA m=4")
+points(farah.ts)
+lines(data.gab[,2], col = "green", lwd = 2)
+lines(data.gab[,3], col = "red", lwd = 2)
+legend("topleft", c("data aktual","data pemulusan","data peramalan"),
+       lty = 8, col = c("black","green","red"), cex = 0.6)
+```
+
+### Akurasi SMA
+
+```{r}
+# Data latih
+error_train.sma <- train.ts - data.ramal[1:length(train.ts)]
+SSE_train.sma  <- sum(error_train.sma[5:n_train]^2)
+MSE_train.sma  <- mean(error_train.sma[5:n_train]^2)
+MAPE_train.sma <- mean(abs(error_train.sma[5:n_train]/train.ts[5:n_train])*100)
+
+akurasi_train.sma <- matrix(c(SSE_train.sma, MSE_train.sma, MAPE_train.sma))
+row.names(akurasi_train.sma) <- c("SSE","MSE","MAPE")
+colnames(akurasi_train.sma) <- "SMA m=4 (Train)"
+akurasi_train.sma
+```
+
+```{r}
+# Data uji
+error_test.sma <- test.ts - data.gab[(n_train+1):n, 3]
+SSE_test.sma  <- sum(error_test.sma^2)
+MSE_test.sma  <- mean(error_test.sma^2)
+MAPE_test.sma <- mean(abs(error_test.sma/test.ts)*100)
+
+akurasi_test.sma <- matrix(c(SSE_test.sma, MSE_test.sma, MAPE_test.sma))
+row.names(akurasi_test.sma) <- c("SSE","MSE","MAPE")
+colnames(akurasi_test.sma) <- "SMA m=4 (Test)"
+akurasi_test.sma
+```
+
+## Double Moving Average (DMA)
+
+DMA lebih cocok untuk data berpola **tren**. Karena dugaan awal kita adalah data ini stasioner (bukan tren), kita tetap coba DMA sebagai pembanding.
+
+```{r}
+dma <- SMA(data.sma, n = 4)
+At <- 2*data.sma - dma
+Bt <- 2/(4-1)*(data.sma - dma)
+data.dma <- At + Bt
+data.ramal2 <- c(NA, data.dma)
+
+t <- 1:n_test
+f <- c()
+for (i in t) {
+  f[i] <- At[length(At)] + Bt[length(Bt)]*(i)
+}
+
+data.gab2 <- cbind(
+  aktual     = c(farah.ts),
+  pemulusan1 = c(data.sma, rep(NA, n_test)),
+  pemulusan2 = c(dma, rep(NA, n_test)),
+  At         = c(At, rep(NA, n_test)),
+  Bt         = c(Bt, rep(NA, n_test)),
+  ramalan    = c(data.ramal2, f[-1])
+)
+tail(data.gab2, 10)
+```
+
+```{r}
+ts.plot(farah.ts, xlab = "Periode", ylab = "Jumlah Penumpang", main = "DMA m=4")
+points(farah.ts)
+lines(data.gab2[,3], col = "green", lwd = 2)
+lines(data.gab2[,6], col = "red", lwd = 2)
+legend("topleft", c("data aktual","data pemulusan","data peramalan"),
+       lty = 8, col = c("black","green","red"), cex = 0.6)
+```
+
+### Akurasi DMA
+
+```{r}
+error_train.dma <- train.ts - data.ramal2[1:length(train.ts)]
+SSE_train.dma  <- sum(error_train.dma[8:n_train]^2)
+MSE_train.dma  <- mean(error_train.dma[8:n_train]^2)
+MAPE_train.dma <- mean(abs(error_train.dma[8:n_train]/train.ts[8:n_train])*100)
+
+akurasi_train.dma <- matrix(c(SSE_train.dma, MSE_train.dma, MAPE_train.dma))
+row.names(akurasi_train.dma) <- c("SSE","MSE","MAPE")
+colnames(akurasi_train.dma) <- "DMA m=4 (Train)"
+akurasi_train.dma
+```
+
+```{r}
+error_test.dma <- test.ts - data.gab2[(n_train+1):n, 6]
+SSE_test.dma  <- sum(error_test.dma^2)
+MSE_test.dma  <- mean(error_test.dma^2)
+MAPE_test.dma <- mean(abs(error_test.dma/test.ts)*100)
+
+akurasi_test.dma <- matrix(c(SSE_test.dma, MSE_test.dma, MAPE_test.dma))
+row.names(akurasi_test.dma) <- c("SSE","MSE","MAPE")
+colnames(akurasi_test.dma) <- "DMA m=4 (Test)"
+akurasi_test.dma
+```
+
+## Single Exponential Smoothing (SES)
+
+SES cocok untuk data stasioner/konstan, memberi bobot menurun secara eksponensial pada data lama.
+
+```{r}
+ses.1 <- ses(train.ts, h = n_test, alpha = 0.2)
+ses.2 <- ses(train.ts, h = n_test, alpha = 0.7)
+ses.opt <- ses(train.ts, h = n_test, alpha = NULL)
+
+ses.opt$model
+```
+
+```{r}
+plot(train.ts, xlab = "Periode", ylab = "Jumlah Penumpang",
+     main = "SES Optimal - Data Latih vs Fitted")
+lines(fitted(ses.opt), col = "blue", lwd = 2)
+legend("topleft", c("data aktual","fitted SES"), col = c("black","blue"), lty = 1, cex = 0.7)
+```
+
+### Akurasi SES (Data Latih)
+
+```{r}
+SSE1 <- sum(residuals(ses.1)^2, na.rm = TRUE);   MSE1 <- SSE1/length(train.ts);   RMSE1 <- sqrt(MSE1)
+SSE2 <- sum(residuals(ses.2)^2, na.rm = TRUE);   MSE2 <- SSE2/length(train.ts);   RMSE2 <- sqrt(MSE2)
+SSEopt <- sum(residuals(ses.opt)^2, na.rm = TRUE); MSEopt <- SSEopt/length(train.ts); RMSEopt <- sqrt(MSEopt)
+
+akurasi_ses_train <- data.frame(
+  Model = c("alpha=0.2","alpha=0.7","alpha optimal"),
+  SSE = c(SSE1, SSE2, SSEopt),
+  MSE = c(MSE1, MSE2, MSEopt),
+  RMSE = c(RMSE1, RMSE2, RMSEopt)
+)
+akurasi_ses_train
+```
+
+### Akurasi SES (Data Uji)
+
+```{r}
+accuracy(ses.1, testing$Farah)
+accuracy(ses.2, testing$Farah)
+accuracy(ses.opt, testing$Farah)
+```
+
+## Double Exponential Smoothing (DES)
+
+DES cocok untuk data berpola tren, menggunakan dua parameter: alpha (level) dan beta (tren).
+
+```{r}
+des.1 <- HoltWinters(train.ts, gamma = FALSE, beta = 0.2, alpha = 0.2)
+des.2 <- HoltWinters(train.ts, gamma = FALSE, beta = 0.3, alpha = 0.6)
+des.opt <- HoltWinters(train.ts, gamma = FALSE)
+
+des.opt
+```
+
+```{r}
+ramalandes1 <- forecast(des.1, h = n_test)
+ramalandes2 <- forecast(des.2, h = n_test)
+ramalandesopt <- forecast(des.opt, h = n_test)
+
+plot(farah.ts)
+lines(des.opt$fitted[,1], lty = 2, col = "blue")
+lines(ramalandesopt$mean, col = "red")
+```
+
+### Akurasi DES (Data Latih)
+
+```{r}
+ssedes.1 <- des.1$SSE; msedes.1 <- ssedes.1/length(train.ts)
+ssedes.2 <- des.2$SSE; msedes.2 <- ssedes.2/length(train.ts)
+ssedes.opt <- des.opt$SSE; msedes.opt <- ssedes.opt/length(train.ts)
+
+akurasi_des_train <- data.frame(
+  Model = c("alpha=0.2,beta=0.2","alpha=0.6,beta=0.3","optimal"),
+  SSE = c(ssedes.1, ssedes.2, ssedes.opt),
+  MSE = c(msedes.1, msedes.2, msedes.opt)
+)
+akurasi_des_train
+```
+
+### Akurasi DES (Data Uji)
+
+```{r}
+selisihdes1 <- ramalandes1$mean - testing$Farah
+selisihdes2 <- ramalandes2$mean - testing$Farah
+selisihdesopt <- ramalandesopt$mean - testing$Farah
+
+akurasi_des_test <- data.frame(
+  Model = c("alpha=0.2,beta=0.2","alpha=0.6,beta=0.3","optimal"),
+  SSE = c(sum(selisihdes1^2), sum(selisihdes2^2), sum(selisihdesopt^2)),
+  MSE = c(mean(selisihdes1^2), mean(selisihdes2^2), mean(selisihdesopt^2)),
+  MAPE = c(mean(abs(selisihdes1/testing$Farah)*100),
+           mean(abs(selisihdes2/testing$Farah)*100),
+           mean(abs(selisihdesopt/testing$Farah)*100))
+)
+akurasi_des_test
+```
+
+## Perbandingan Seluruh Metode & Kesimpulan
+
+```{r}
+perbandingan <- data.frame(
+  Metode = c("SMA (m=4)", "DMA (m=4)", "SES (alpha optimal)", "DES (optimal)"),
+  MSE_Test  = c(MSE_test.sma, MSE_test.dma, NA, mean(selisihdesopt^2)),
+  MAPE_Test = c(MAPE_test.sma, MAPE_test.dma, NA, mean(abs(selisihdesopt/testing$Farah)*100))
+)
+perbandingan
+```
+
+**Catatan:** nilai MSE/MAPE data uji untuk SES dapat dilihat langsung dari output `accuracy(ses.opt, testing$Farah)` pada bagian sebelumnya (kolom "Test set").
+
+### Kesimpulan
+
+Berdasarkan hasil eksplorasi awal, plot data menunjukkan pola **stasioner/konstan** (berfluktuasi di sekitar rata-rata, tanpa tren jangka panjang yang jelas). Hal ini konsisten dengan hasil perbandingan metode:
+
+- **DMA** menghasilkan error (MSE/MAPE) yang **paling besar**, karena metode ini dirancang untuk data bertren -- memaksakan estimasi tren pada data yang sebenarnya tidak trending justru menambah kesalahan.
+- **SMA** memberikan hasil lebih baik daripada DMA, sesuai dugaan bahwa data ini lebih cocok didekati dengan metode untuk data stasioner.
+- **SES** dan **DES** dengan parameter optimal menghasilkan akurasi terbaik (MAPE data uji terkecil). Menariknya, parameter beta pada DES optimal cenderung mendekati nol, yang berarti model DES "menyusut" menjadi mirip SES -- ini semakin menguatkan bahwa data tidak memiliki komponen tren yang signifikan.
+
+**Metode terbaik: Single Exponential Smoothing (SES) dengan alpha optimal**, karena menghasilkan nilai MAPE data uji paling kecil di antara seluruh metode yang dicoba, sekaligus merupakan metode yang paling sesuai secara konseptual dengan pola data yang stasioner.
