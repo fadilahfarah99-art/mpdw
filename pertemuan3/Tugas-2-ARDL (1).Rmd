@@ -1,0 +1,224 @@
+---
+title: "Tugas 2 - ARDL (Sales ~ Advertising)"
+author: "Siti Farah Fadilah"
+output:
+  html_document:
+    theme: yeti
+    toc: true
+    toc_float: true
+---
+
+## Packages
+
+```{r, message=FALSE, warning=FALSE}
+# Jalankan baris di bawah SEKALI SAJA lewat Console (bukan lewat Knit) kalau package belum terinstall:
+# install.packages("dLagM")
+# install.packages("dynlm")
+# install.packages("MLmetrics")
+library(dLagM)
+library(dynlm)
+library(MLmetrics)
+library(lmtest)
+```
+
+## Data
+
+Data tahunan 1975-2014 (40 observasi). Y = Sales, X = Advertising.
+
+```{r}
+data2 <- data.frame(
+  Year = 1975:2014,
+  Yt = c(11.7,12.0,12.3,12.8,13.1,13.6,13.9,14.4,14.7,15.3,
+         15.5,15.8,16.1,16.6,16.9,16.7,16.9,17.4,17.6,17.9,
+         18.0,17.9,18.0,18.2,18.2,18.3,18.6,19.2,19.3,19.5,
+         19.2,19.3,19.5,20.0,20.0,19.9,19.8,19.9,20.2,21.0),
+  Xt = c(9.4,9.6,10.0,10.4,10.8,10.9,11.7,12.2,12.5,12.9,
+         13.0,13.2,13.8,14.2,14.6,14.4,15.0,15.4,15.7,15.9,
+         15.9,16.0,16.3,16.2,16.8,17.3,17.6,18.1,18.3,18.5,
+         18.7,18.9,19.2,20.0,20.0,20.3,20.4,21.0,21.5,22.1)
+)
+data2
+```
+
+## Pembagian Data
+
+```{r}
+train2 <- data2[1:30,]
+test2  <- data2[31:40,]
+train2.ts <- ts(train2)
+```
+
+## Model Koyck
+
+```{r}
+model.koyck2 <- koyckDlm(x = train2$Xt, y = train2$Yt)
+summary(model.koyck2)
+AIC(model.koyck2)
+BIC(model.koyck2)
+```
+
+```{r}
+fore.koyck2 <- forecast(model = model.koyck2, x = test2$Xt, h = 10)
+mape.koyck2 <- MAPE(fore.koyck2$forecasts, test2$Yt)
+mape.koyck2
+GoF(model.koyck2)
+```
+
+## Regression with Distributed Lag (q = 1, baseline)
+
+```{r}
+model.dlm2b <- dlm(x = train2$Xt, y = train2$Yt, q = 1)
+summary(model.dlm2b)
+AIC(model.dlm2b)
+BIC(model.dlm2b)
+```
+
+```{r}
+fore.dlm2b <- forecast(model = model.dlm2b, x = test2$Xt, h = 10)
+mape.dlm2b <- MAPE(fore.dlm2b$forecasts, test2$Yt)
+mape.dlm2b
+GoF(model.dlm2b)
+```
+
+## Pencarian Lag Optimum untuk DLM (otomatis)
+
+```{r}
+res_dlm2 <- finiteDLMauto(formula = Yt ~ Xt,
+                           data = data.frame(train2), q.min = 1, q.max = 10,
+                           model.type = "dlm", error.type = "AIC", trace = TRUE)
+
+metric_col2 <- setdiff(names(res_dlm2), "q")[1]
+opt_q2 <- res_dlm2$q[which.min(res_dlm2[[metric_col2]])]
+cat("Lag q optimum DLM:", opt_q2, "\n")
+```
+
+```{r}
+model.dlm2opt <- dlm(x = train2$Xt, y = train2$Yt, q = opt_q2)
+summary(model.dlm2opt)
+AIC(model.dlm2opt)
+BIC(model.dlm2opt)
+```
+
+```{r}
+fore.dlm2opt <- forecast(model = model.dlm2opt, x = test2$Xt, h = 10)
+mape.dlm2opt <- MAPE(fore.dlm2opt$forecasts, test2$Yt)
+mape.dlm2opt
+GoF(model.dlm2opt)
+```
+
+## Model ARDL Baseline / Autoregressive (p = 1, q = 1)
+
+```{r}
+model.ardl2 <- ardlDlm(formula = Yt ~ Xt, data = train2, p = 1, q = 1)
+summary(model.ardl2)
+AIC(model.ardl2)
+BIC(model.ardl2)
+```
+
+```{r}
+fore.ardl2 <- forecast(model = model.ardl2, x = test2$Xt, h = 10)
+mape.ardl2 <- MAPE(fore.ardl2$forecasts, test2$Yt)
+mape.ardl2
+GoF(model.ardl2)
+```
+
+## Pencarian Order ARDL (p, q) Optimum (otomatis)
+
+```{r}
+model.ardl2.search <- ardlBoundOrders(data = data.frame(train2), ic = "AIC",
+                                        formula = Yt ~ Xt)
+model.ardl2.search
+
+min_p <- c()
+for(i in 1:6){
+  min_p[i] <- min(model.ardl2.search$Stat.table[[i]])
+}
+q_opt <- which(min_p == min(min_p, na.rm = TRUE))[1]
+p_opt <- which(model.ardl2.search$Stat.table[[q_opt]] ==
+                 min(model.ardl2.search$Stat.table[[q_opt]], na.rm = TRUE))[1]
+cat("p optimum:", p_opt, " | q optimum:", q_opt, "\n")
+```
+
+```{r}
+model.ardl2.best <- ardlDlm(formula = Yt ~ Xt, data = train2, p = p_opt, q = q_opt)
+summary(model.ardl2.best)
+AIC(model.ardl2.best)
+BIC(model.ardl2.best)
+```
+
+```{r}
+fore.ardl2.best <- forecast(model = model.ardl2.best, x = test2$Xt, h = 10)
+mape.ardl2.best <- MAPE(fore.ardl2.best$forecasts, test2$Yt)
+mape.ardl2.best
+GoF(model.ardl2.best)
+```
+
+## Cek Alternatif dengan `dynlm` (formula dibangun otomatis sesuai p,q optimum)
+
+```{r}
+x_lags <- if (p_opt >= 1) paste0("L(Xt,", 1:p_opt, ")") else NULL
+y_lags <- if (q_opt >= 1) paste0("L(Yt,", 1:q_opt, ")") else NULL
+rhs <- paste(c("Xt", x_lags, y_lags), collapse = " + ")
+formula_ardl <- as.formula(paste("Yt ~", rhs))
+formula_ardl
+
+ardl_lm2 <- dynlm(formula_ardl, data = train2.ts)
+summary(ardl_lm2)
+```
+
+### Uji Diagnostik Residual
+
+```{r}
+dwtest(ardl_lm2)
+bptest(ardl_lm2)
+shapiro.test(residuals(ardl_lm2))
+```
+
+- Durbin-Watson: p-value > 0.05 -> tidak ada autokorelasi.
+- Breusch-Pagan: p-value > 0.05 -> tidak ada heteroskedastisitas.
+- Shapiro-Wilk: p-value > 0.05 -> residual normal.
+
+## Perbandingan Model
+
+```{r}
+akurasi2 <- matrix(c(mape.koyck2, mape.dlm2b, mape.dlm2opt, mape.ardl2, mape.ardl2.best))
+row.names(akurasi2) <- c("Koyck", "DLM (q=1)", paste0("DLM (q=", opt_q2, ")"),
+                          "Autoregressive (p=1,q=1)", paste0("ARDL (p=", p_opt, ",q=", q_opt, ")"))
+colnames(akurasi2) <- c("MAPE")
+akurasi2
+```
+
+Model dengan **MAPE terkecil** dan lolos uji diagnostik adalah model terbaik untuk Latihan 2.
+
+## Plot Perbandingan Hasil Peramalan vs Aktual
+
+```{r, fig.width=8, fig.height=5}
+plot(1:10, test2$Yt, type = "b", col = "black", lwd = 2, pch = 16,
+     xlab = "Periode ke- (data test)", ylab = "Sales",
+     ylim = range(c(test2$Yt, fore.koyck2$forecasts, fore.dlm2b$forecasts,
+                    fore.dlm2opt$forecasts, fore.ardl2$forecasts, fore.ardl2.best$forecasts)),
+     main = "Perbandingan Aktual vs Hasil Peramalan - Latihan 2")
+
+points(1:10, fore.koyck2$forecasts, col = "red", pch = 16)
+lines(1:10, fore.koyck2$forecasts, col = "red")
+
+points(1:10, fore.dlm2b$forecasts, col = "blue", pch = 16)
+lines(1:10, fore.dlm2b$forecasts, col = "blue")
+
+points(1:10, fore.dlm2opt$forecasts, col = "orange", pch = 16)
+lines(1:10, fore.dlm2opt$forecasts, col = "orange")
+
+points(1:10, fore.ardl2$forecasts, col = "purple", pch = 16)
+lines(1:10, fore.ardl2$forecasts, col = "purple")
+
+points(1:10, fore.ardl2.best$forecasts, col = "green", pch = 16)
+lines(1:10, fore.ardl2.best$forecasts, col = "green")
+
+legend("topleft",
+       legend = c("Aktual", "Koyck", "DLM (q=1)", paste0("DLM (q=", opt_q2, ")"),
+                  "Autoregressive", paste0("ARDL (p=", p_opt, ",q=", q_opt, ")")),
+       col = c("black", "red", "blue", "orange", "purple", "green"),
+       lty = 1, pch = 16, cex = 0.7)
+```
+
+Grafik ini menunjukkan seberapa dekat hasil peramalan tiap model (garis berwarna) terhadap nilai aktual data test (garis hitam). Semakin berhimpit dengan garis hitam, semakin baik model tersebut.

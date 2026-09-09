@@ -1,0 +1,157 @@
+---
+title: "Tugas 1 - Distributed Lag (Market Share ~ Price)"
+author: "Siti Farah Fadilah"
+output:
+  html_document:
+    theme: yeti
+    toc: true
+    toc_float: true
+---
+
+## Packages
+
+```{r, message=FALSE, warning=FALSE}
+# Jalankan baris di bawah SEKALI SAJA lewat Console (bukan lewat Knit) kalau package belum terinstall:
+# install.packages("dLagM")
+# install.packages("MLmetrics")
+library(dLagM)
+library(MLmetrics)
+```
+
+## Data
+
+Data pangsa pasar pasta gigi selama 20 periode. Y = Market Share, X = Price.
+
+```{r}
+data1 <- data.frame(
+  Period = 1:20,
+  Yt = c(3.63,4.20,3.33,4.54,2.89,4.87,4.90,5.29,6.18,7.20,
+         7.25,6.09,6.80,8.65,8.43,8.29,7.18,7.90,8.45,8.23),
+  Xt = c(0.97,0.95,0.99,0.91,0.98,0.90,0.89,0.86,0.85,0.82,
+         0.79,0.83,0.81,0.77,0.76,0.80,0.83,0.79,0.76,0.78)
+)
+data1
+```
+
+## Pembagian Data
+
+```{r}
+train1 <- data1[1:15,]
+test1  <- data1[16:20,]
+```
+
+## Model Koyck
+
+```{r}
+model.koyck1 <- koyckDlm(x = train1$Xt, y = train1$Yt)
+summary(model.koyck1)
+AIC(model.koyck1)
+BIC(model.koyck1)
+```
+
+```{r}
+fore.koyck1 <- forecast(model = model.koyck1, x = test1$Xt, h = 5)
+mape.koyck1 <- MAPE(fore.koyck1$forecasts, test1$Yt)
+mape.koyck1
+GoF(model.koyck1)
+```
+
+## Regression with Distributed Lag (q = 1, baseline)
+
+```{r}
+model.dlm1 <- dlm(x = train1$Xt, y = train1$Yt, q = 1)
+summary(model.dlm1)
+AIC(model.dlm1)
+BIC(model.dlm1)
+```
+
+```{r}
+fore.dlm1 <- forecast(model = model.dlm1, x = test1$Xt, h = 5)
+mape.dlm1 <- MAPE(fore.dlm1$forecasts, test1$Yt)
+mape.dlm1
+GoF(model.dlm1)
+```
+
+## Pencarian dan Pemodelan Lag Optimum (otomatis)
+
+```{r}
+res_dlm1 <- finiteDLMauto(formula = Yt ~ Xt,
+                           data = data.frame(train1), q.min = 1, q.max = 10,
+                           model.type = "dlm", error.type = "AIC", trace = TRUE)
+
+metric_col1 <- setdiff(names(res_dlm1), "q")[1]
+opt_q1 <- res_dlm1$q[which.min(res_dlm1[[metric_col1]])]
+cat("Lag q optimum:", opt_q1, "\n")
+```
+
+```{r}
+model.dlm1.opt <- dlm(x = train1$Xt, y = train1$Yt, q = opt_q1)
+summary(model.dlm1.opt)
+AIC(model.dlm1.opt)
+BIC(model.dlm1.opt)
+```
+
+```{r}
+fore.dlm1.opt <- forecast(model = model.dlm1.opt, x = test1$Xt, h = 5)
+mape.dlm1.opt <- MAPE(fore.dlm1.opt$forecasts, test1$Yt)
+mape.dlm1.opt
+GoF(model.dlm1.opt)
+```
+
+## Model Autoregressive (p = 1, q = 1)
+
+Model ini memasukkan lag dari X sekaligus lag dari Y sendiri (Yt-1) sebagai prediktor, berbeda dari DLM murni yang hanya memakai lag X.
+
+```{r}
+model.ar1 <- ardlDlm(formula = Yt ~ Xt, data = train1, p = 1, q = 1)
+summary(model.ar1)
+AIC(model.ar1)
+BIC(model.ar1)
+```
+
+```{r}
+fore.ar1 <- forecast(model = model.ar1, x = test1$Xt, h = 5)
+mape.ar1 <- MAPE(fore.ar1$forecasts, test1$Yt)
+mape.ar1
+GoF(model.ar1)
+```
+
+## Perbandingan Model
+
+```{r}
+akurasi1 <- matrix(c(mape.koyck1, mape.dlm1, mape.dlm1.opt, mape.ar1))
+row.names(akurasi1) <- c("Koyck", "DLM (q=1)", paste0("DLM (q=", opt_q1, ")"), "Autoregressive (p=1,q=1)")
+colnames(akurasi1) <- c("MAPE")
+akurasi1
+```
+
+Model dengan **MAPE terkecil** pada tabel di atas adalah model terbaik.
+
+## Plot Perbandingan Hasil Peramalan vs Aktual
+
+```{r, fig.width=8, fig.height=5}
+plot(1:5, test1$Yt, type = "b", col = "black", lwd = 2, pch = 16,
+     xlab = "Periode ke- (data test)", ylab = "Market Share",
+     ylim = range(c(test1$Yt, fore.koyck1$forecasts, fore.dlm1$forecasts,
+                    fore.dlm1.opt$forecasts, fore.ar1$forecasts)),
+     main = "Perbandingan Aktual vs Hasil Peramalan - Latihan 1")
+
+points(1:5, fore.koyck1$forecasts, col = "red", pch = 16)
+lines(1:5, fore.koyck1$forecasts, col = "red")
+
+points(1:5, fore.dlm1$forecasts, col = "blue", pch = 16)
+lines(1:5, fore.dlm1$forecasts, col = "blue")
+
+points(1:5, fore.dlm1.opt$forecasts, col = "orange", pch = 16)
+lines(1:5, fore.dlm1.opt$forecasts, col = "orange")
+
+points(1:5, fore.ar1$forecasts, col = "green", pch = 16)
+lines(1:5, fore.ar1$forecasts, col = "green")
+
+legend("topleft",
+       legend = c("Aktual", "Koyck", "DLM (q=1)", paste0("DLM (q=", opt_q1, ")"), "Autoregressive"),
+       col = c("black", "red", "blue", "orange", "green"),
+       lty = 1, pch = 16, cex = 0.8)
+```
+
+Grafik ini menunjukkan seberapa dekat hasil peramalan tiap model (garis berwarna) terhadap nilai aktual data test (garis hitam). Semakin berhimpit dengan garis hitam, semakin baik model tersebut.
