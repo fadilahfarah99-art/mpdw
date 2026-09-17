@@ -1,0 +1,239 @@
+---
+title: "Latihan Pertemuan 4 - Proses AR, MA, dan ARMA"
+author: "Siti Farah Fadilah - X1004261005"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+library(TSA)
+library(forecast)
+set.seed(123)
+n <- 300
+
+# Fungsi bantu: membandingkan autokorelasi empiris (data bangkitan) vs teoritis
+hitung_acf_pembanding <- function(series, ar = numeric(0), ma = numeric(0), lag.max = 5) {
+  emp_raw <- as.numeric(acf(series, plot = FALSE, lag.max = lag.max)$acf)
+  names(emp_raw) <- 0:(length(emp_raw) - 1)
+
+  teo_raw <- ARMAacf(ar = ar, ma = ma, lag.max = lag.max)
+
+  # Ambil berdasarkan NAMA lag (bukan posisi), supaya panjangnya selalu
+  # sama persis dengan 1:lag.max walau ARMAacf() tidak selalu mengembalikan
+  # vektor sepanjang lag.max + 1
+  empiris  <- unname(emp_raw[as.character(1:lag.max)])
+  teoritis <- unname(teo_raw[as.character(1:lag.max)])
+
+  data.frame(Lag = 1:lag.max, Empiris = round(empiris, 4), Teoritis = round(teoritis, 4))
+}
+```
+
+# Proses MA(2)
+
+Model: $Y_t = e_t + \theta_1 e_{t-1} + \theta_2 e_{t-2}$, dengan $\theta_1 = 0.4$ dan $\theta_2 = 0.6$.
+
+## Bangkitkan Data
+
+### Manual
+
+```{r ma2-manual}
+theta1 <- 0.4
+theta2 <- 0.6
+
+e <- rnorm(n + 2)
+y_ma2_manual <- numeric(n)
+for (t in 3:(n + 2)) {
+  y_ma2_manual[t - 2] <- e[t] + theta1 * e[t - 1] + theta2 * e[t - 2]
+}
+y_ma2_manual <- ts(y_ma2_manual)
+```
+
+### Menggunakan `arima.sim`
+
+```{r ma2-sim}
+y_ma2_sim <- arima.sim(model = list(ma = c(theta1, theta2)), n = n)
+```
+
+## Plot Time Series, ACF, PACF, EACF
+
+```{r ma2-plots, fig.height=8, fig.width=9}
+par(mfrow = c(2, 2))
+plot.ts(y_ma2_sim, main = "Plot Time Series MA(2)", ylab = "Yt")
+acf(y_ma2_sim, main = "ACF MA(2)")
+pacf(y_ma2_sim, main = "PACF MA(2)")
+eacf(y_ma2_sim)
+par(mfrow = c(1, 1))
+```
+
+**Identifikasi kestasioneran:** Proses MA(2) selalu stasioner untuk sembarang nilai $\theta_1, \theta_2$ karena tidak ada syarat kestasioneran pada model MA (hanya syarat invertibilitas). Hal ini didukung oleh plot time series yang berfluktuasi di sekitar rataan yang konstan (tidak menunjukkan tren atau perubahan varians sistematis), serta plot ACF yang terpotong (cuts off) setelah lag ke-2, sesuai teori proses MA(2).
+
+## Scatterplot Antar-Lag
+
+```{r ma2-scatter, fig.height=4, fig.width=10}
+y <- as.numeric(y_ma2_sim)
+par(mfrow = c(1, 3))
+plot(y[1:(n - 1)], y[2:n], xlab = "Yt-1", ylab = "Yt", main = "Yt vs Yt-1", pch = 19, col = "steelblue")
+plot(y[1:(n - 2)], y[3:n], xlab = "Yt-2", ylab = "Yt", main = "Yt vs Yt-2", pch = 19, col = "steelblue")
+plot(y[1:(n - 3)], y[4:n], xlab = "Yt-3", ylab = "Yt", main = "Yt vs Yt-3", pch = 19, col = "steelblue")
+par(mfrow = c(1, 1))
+```
+
+## Autokorelasi: Data Bangkitan vs Teoritis
+
+```{r ma2-acf-compare}
+tabel_ma2 <- hitung_acf_pembanding(y_ma2_sim, ma = c(theta1, theta2))
+tabel_ma2
+```
+
+------------------------------------------------------------------------
+
+# Proses AR(2)
+
+Model: $Y_t = \phi_1 Y_{t-1} + \phi_2 Y_{t-2} + e_t$, dengan $\phi_1 = 0.5$ dan $\phi_2 = 0.2$.
+
+## Bangkitkan Data
+
+### Manual
+
+```{r ar2-manual}
+phi1 <- 0.5
+phi2 <- 0.2
+
+burn_in <- 100
+e_ar <- rnorm(n + burn_in)
+y_ar2_manual <- numeric(n + burn_in)
+y_ar2_manual[1:2] <- e_ar[1:2]
+for (t in 3:(n + burn_in)) {
+  y_ar2_manual[t] <- phi1 * y_ar2_manual[t - 1] + phi2 * y_ar2_manual[t - 2] + e_ar[t]
+}
+y_ar2_manual <- ts(y_ar2_manual[(burn_in + 1):(n + burn_in)])
+```
+
+### Menggunakan `arima.sim`
+
+```{r ar2-sim}
+y_ar2_sim <- arima.sim(model = list(ar = c(phi1, phi2)), n = n)
+```
+
+## Plot Time Series, ACF, PACF, EACF
+
+```{r ar2-plots, fig.height=8, fig.width=9}
+par(mfrow = c(2, 2))
+plot.ts(y_ar2_sim, main = "Plot Time Series AR(2)", ylab = "Yt")
+acf(y_ar2_sim, main = "ACF AR(2)")
+pacf(y_ar2_sim, main = "PACF AR(2)")
+eacf(y_ar2_sim)
+par(mfrow = c(1, 1))
+```
+
+**Identifikasi kestasioneran:** Syarat kestasioneran AR(2) adalah $\phi_2 < 1$, $\phi_1 + \phi_2 < 1$, dan $\phi_2 - \phi_1 < 1$.
+
+```{r ar2-stationarity-check}
+cat("phi2 < 1        :", phi2 < 1, "\n")
+cat("phi1 + phi2 < 1  :", (phi1 + phi2) < 1, "\n")
+cat("phi2 - phi1 < 1  :", (phi2 - phi1) < 1, "\n")
+```
+
+Ketiga syarat terpenuhi sehingga proses AR(2) ini stasioner. Hal ini sejalan dengan plot time series yang berfluktuasi di sekitar rataan konstan, serta plot PACF yang terpotong setelah lag ke-2 dan ACF yang meluruh (dies down) secara eksponensial/sinusoidal.
+
+## Scatterplot Antar-Lag
+
+```{r ar2-scatter, fig.height=4, fig.width=10}
+y2 <- as.numeric(y_ar2_sim)
+par(mfrow = c(1, 3))
+plot(y2[1:(n - 1)], y2[2:n], xlab = "Yt-1", ylab = "Yt", main = "Yt vs Yt-1", pch = 19, col = "darkorange")
+plot(y2[1:(n - 2)], y2[3:n], xlab = "Yt-2", ylab = "Yt", main = "Yt vs Yt-2", pch = 19, col = "darkorange")
+plot(y2[1:(n - 3)], y2[4:n], xlab = "Yt-3", ylab = "Yt", main = "Yt vs Yt-3", pch = 19, col = "darkorange")
+par(mfrow = c(1, 1))
+```
+
+## Autokorelasi: Data Bangkitan vs Teoritis
+
+```{r ar2-acf-compare}
+tabel_ar2 <- hitung_acf_pembanding(y_ar2_sim, ar = c(phi1, phi2))
+tabel_ar2
+```
+
+------------------------------------------------------------------------
+
+# Proses ARMA(2,2)
+
+Model: $Y_t = \phi_1 Y_{t-1} + \phi_2 Y_{t-2} + e_t + \theta_1 e_{t-1} + \theta_2 e_{t-2}$, dengan $\theta_1 = 0.4$, $\theta_2 = 0.6$, $\phi_1 = 0.5$, $\phi_2 = 0.2$.
+
+## Bangkitkan Data
+
+### Manual
+
+```{r arma22-manual}
+burn_in2 <- 100
+e_arma <- rnorm(n + burn_in2)
+y_arma22_manual <- numeric(n + burn_in2)
+y_arma22_manual[1:2] <- e_arma[1:2]
+for (t in 3:(n + burn_in2)) {
+  y_arma22_manual[t] <- phi1 * y_arma22_manual[t - 1] + phi2 * y_arma22_manual[t - 2] +
+    e_arma[t] + theta1 * e_arma[t - 1] + theta2 * e_arma[t - 2]
+}
+y_arma22_manual <- ts(y_arma22_manual[(burn_in2 + 1):(n + burn_in2)])
+```
+
+### Menggunakan `arima.sim`
+
+```{r arma22-sim}
+y_arma22_sim <- arima.sim(model = list(ar = c(phi1, phi2), ma = c(theta1, theta2)), n = n)
+```
+
+## Plot Time Series, ACF, PACF, EACF
+
+```{r arma22-plots, fig.height=8, fig.width=9}
+par(mfrow = c(2, 2))
+plot.ts(y_arma22_sim, main = "Plot Time Series ARMA(2,2)", ylab = "Yt")
+acf(y_arma22_sim, main = "ACF ARMA(2,2)")
+pacf(y_arma22_sim, main = "PACF ARMA(2,2)")
+eacf(y_arma22_sim)
+par(mfrow = c(1, 1))
+```
+
+**Identifikasi kestasioneran:** Kestasioneran proses ARMA(2,2) ditentukan oleh komponen AR-nya, dengan syarat yang sama seperti AR(2): $\phi_2 < 1$, $\phi_1 + \phi_2 < 1$, dan $\phi_2 - \phi_1 < 1$.
+
+```{r arma22-stationarity-check}
+cat("phi2 < 1        :", phi2 < 1, "\n")
+cat("phi1 + phi2 < 1  :", (phi1 + phi2) < 1, "\n")
+cat("phi2 - phi1 < 1  :", (phi2 - phi1) < 1, "\n")
+```
+
+Ketiga syarat terpenuhi sehingga proses ARMA(2,2) ini stasioner, sesuai plot time series yang berfluktuasi di sekitar rataan konstan. Baik ACF maupun PACF meluruh (dies down) secara bertahap, ciri khas proses campuran ARMA.
+
+## Scatterplot Antar-Lag
+
+```{r arma22-scatter, fig.height=4, fig.width=10}
+y3 <- as.numeric(y_arma22_sim)
+par(mfrow = c(1, 3))
+plot(y3[1:(n - 1)], y3[2:n], xlab = "Yt-1", ylab = "Yt", main = "Yt vs Yt-1", pch = 19, col = "forestgreen")
+plot(y3[1:(n - 2)], y3[3:n], xlab = "Yt-2", ylab = "Yt", main = "Yt vs Yt-2", pch = 19, col = "forestgreen")
+plot(y3[1:(n - 3)], y3[4:n], xlab = "Yt-3", ylab = "Yt", main = "Yt vs Yt-3", pch = 19, col = "forestgreen")
+par(mfrow = c(1, 1))
+```
+
+## Autokorelasi: Data Bangkitan vs Teoritis
+
+```{r arma22-acf-compare}
+tabel_arma22 <- hitung_acf_pembanding(y_arma22_sim, ar = c(phi1, phi2), ma = c(theta1, theta2))
+tabel_arma22
+```
+
+------------------------------------------------------------------------
+
+# Kesimpulan
+
+| Proses | Syarat Stasioner | Ciri ACF | Ciri PACF |
+|------------------|------------------|------------------|------------------|
+| MA(2) | Selalu stasioner | Cuts off setelah lag 2 | Dies down |
+| AR(2) | $\phi_2<1,\ \phi_1+\phi_2<1,\ \phi_2-\phi_1<1$ | Dies down | Cuts off setelah lag 2 |
+| ARMA(2,2) | Sama seperti AR(2) (ditentukan komponen AR) | Dies down | Dies down |
+
+Nilai autokorelasi empiris (dari data bangkitan) pada ketiga proses mendekati nilai autokorelasi teoritisnya, dengan sedikit deviasi yang wajar akibat sifat acak (random sampling) dalam proses pembangkitan data.
